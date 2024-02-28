@@ -114,15 +114,16 @@ def init_distributed_mode(params):
 
         params.is_distributed = True
 
-    # multi-GPU job (local or multi-node) - jobs started with torch.distributed.launch
-    elif has_local_rank and params.local_rank != -1:
+    # multi-GPU job (local or multi-node) - jobs started with torch.distributed.run
+    elif has_local_rank and "LOCAL_RANK" in os.environ:
 
         assert params.main_port == -1
 
         # read environment variables
+        params.local_rank = int(os.environ["LOCAL_RANK"])
         params.global_rank = int(os.environ["RANK"])
         params.world_size = int(os.environ["WORLD_SIZE"])
-        params.n_gpu_per_node = int(os.environ["NGPU"])
+        params.n_gpu_per_node = int(os.environ["LOCAL_WORLD_SIZE"])
 
         # number of nodes / node ID
         params.n_nodes = params.world_size // params.n_gpu_per_node
