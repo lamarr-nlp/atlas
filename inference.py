@@ -4,14 +4,21 @@
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 
+from argparse import Namespace
 import os
 import time
 from collections import defaultdict
+from typing import Dict, List
+from fastapi import FastAPI
 
 import numpy as np
+from pydantic import BaseModel
 import torch
 import torch.cuda
 import torch.distributed as dist
+import uvicorn
+from src.atlas import Atlas
+from src.index import DistributedIndex
 
 from src import dist_utils, slurm, util
 from src.index_io import load_or_initialize_index, save_embeddings_and_index
@@ -164,8 +171,65 @@ def evaluate(model, index, opt, data_path, step=None):
     return metrics
 
 @torch.no_grad()
-def inference(model, index, opt, data_path, step=None):
-    ...
+def retrieve(queries: List[str], model: Atlas, index: DistributedIndex, opt: Namespace) -> List[List[Dict[str, str]]]:
+    model.eval()
+    unwrapped_model = util.get_unwrapped_model_if_wrapped(model)
+    query_enc, _, _ = unwrapped_model.tokenize(queries, [""], target_tokens=None)
+    query_ids_retriever = query_enc["input_ids"].cuda()
+    query_mask_retriever = query_enc["attention_mask"].cuda()
+    retrieved_passages, _ = unwrapped_model.retrieve(
+        index,
+        opt.n_context,
+        queries,
+        query_ids_retriever,
+        query_mask_retriever,
+        batch_metadata=None,
+        filtering_fun=None,
+    )
+    return retrieved_passages
+
+@torch.no_grad()
+def reader_prediction(queries: List[str], passages: List[List[Dict[str, str]]], model: Atlas):
+    unwrapped_model = util.get_unwrapped_model_if_wrapped(model)
+
+    reader_tokens, _ = unwrapped_model.tokenize_passages(queries, passages)
+    generation = unwrapped_model.generate(reader_tokens, queries, choices=None)
+
+    predictions = []
+    reader_tokenizer = unwrapped_model.reader_tokenizer
+    for k, g in enumerate(generation):
+        if opt.decoder_prompt_format is not None:
+            query_ids = reader_tokenizer.encode(
+                opt.decoder_prompt_format.format_map({"query": queries[k]}), add_special_tokens=False
+            )
+            g = g[len(query_ids) + 1 :]
+        predictions.append(reader_tokenizer.decode(g, skip_special_tokens=True))
+    return predictions
+
+@torch.no_grad()
+def inference_with_retrieval(queries, model, index, opt):
+    model.eval()
+    retrieved_passages = retrieve(queries=queries, model=model, index=index, opt=opt)
+    predictions = reader_prediction(queries=queries, passages=retrieved_passages, model=model)
+    return predictions
+
+
+class StrList(BaseModel):
+    str_list: list[str]
+
+class AtlasAPI(FastAPI):
+    def __init__(self, model: Atlas, index: DistributedIndex, opt: Namespace, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.model = model
+        self.index = index
+        self.opt = opt
+
+        self.add_api_route("/inference_with_retrieval", self.inference_with_retrieval_api, methods=["POST"], response_model=StrList)
+
+    def inference_with_retrieval_api(self, queries: StrList) -> StrList:
+        logger.info("Inference Request")
+        return StrList(str_list=inference_with_retrieval(queries.str_list, self.model, self.index, self.opt))
+        
 
 if __name__ == "__main__":
     options = get_options()
@@ -174,6 +238,8 @@ if __name__ == "__main__":
     torch.manual_seed(opt.seed)
     slurm.init_distributed_mode(opt)
     slurm.init_signal_handler()
+
+    assert not opt.multi_gpu, "FastAPI serving only supports singel GPU inference!"
 
     checkpoint_path, saved_index_path = create_checkpoint_directories(opt)
 
@@ -186,24 +252,22 @@ if __name__ == "__main__":
     index, passages = load_or_initialize_index(opt)
     model, _, _, _, _, opt, step = load_or_initialize_atlas_model(opt, eval_only=True)
 
-    logger.info("Start Evaluation")
+    
     dist_utils.barrier()
 
+    
     if not opt.use_file_passages and opt.load_index_path is None:
+        logger.info("Build index")
         indexing_start = time.time()
         model.build_index(index, passages, opt.per_gpu_embedder_batch_size, logger)
 
         if opt.save_index_path is not None:
             save_embeddings_and_index(index, opt)
 
-    for data_path in opt.eval_data:
-        dataset_name = os.path.basename(data_path)
-        logger.info(f"Start Evaluation on {data_path}")
-        if opt.retrieve_only:
-            run_retrieval_only(model, index, opt, data_path, step)
-        else:
-            metrics = evaluate(model, index, opt, data_path, step)
-            log_message = f"Dataset: {dataset_name}"
-            for k, v in metrics.items():
-                log_message += f" | {v:.3f} {k}"
-            logger.info(log_message)
+    logger.info("Start Inference")
+    # queries = ["Who is Rick Bayless?"]
+    
+    # predictions = inference_with_retrieval(queries, model, index, opt)
+    # logger.info(predictions)
+    api = AtlasAPI(model, index, opt)
+    uvicorn.run(api, host="localhost", port=8666 + opt.local_rank)
