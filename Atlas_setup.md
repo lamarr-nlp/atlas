@@ -1,6 +1,8 @@
-# Setup Atlas
+# Atlas Setup
 
-## DGX3
+> Atlas-large needed 14 GB GPU memory with batch size 1
+
+## DGX2
 
 ### Setup
 ```bash
@@ -23,7 +25,7 @@ cd atlas
 mkdir -p "downloads/experiments/"
 python preprocessing/download_model.py --model models/atlas_nq/large --output_directory "/raid/s3/opengptx/atlas_resources/downloads"
 python preprocessing/download_index.py --index indices/atlas_nq/wiki/large --output_directory "/raid/s3/opengptx/atlas_resources/downloads"
-python preprocessing/prepare_qa.py --output_directory "downloads"
+python preprocessing/prepare_qa.py --output_directory "/raid/s3/opengptx/atlas_resources/downloads"
 ```
 
 ## Test Setup in VSCode `launch.json` or bash
