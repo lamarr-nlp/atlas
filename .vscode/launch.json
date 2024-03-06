@@ -1,0 +1,78 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Python: Debug Unit Tests",
+            "type": "python",
+            "request": "launch",
+            "purpose": [
+                "debug-test"
+            ],
+            "console": "integratedTerminal",
+            "justMyCode": false,
+        },
+        {
+            "name": "Torchrun Atlas Inference",
+            "type": "python",
+            "request": "launch",
+            "module": "torch.distributed.run",
+            "env": {
+                "CUDA_VISIBLE_DEVICES": "2"
+            },
+            "args": [
+                "--standalone",
+                "--nnodes",
+                "1",
+                "--nproc_per_node",
+                "1",
+                "inference.py",
+                "--name",
+                "dev-eval-large-nq",
+                "--generation_max_length",
+                "32",
+                "--target_maxlength",
+                "32",
+                "--gold_score_mode",
+                "ppmean",
+                "--precision",
+                "fp32",
+                "--reader_model_type",
+                "google/t5-large-lm-adapt",
+                "--text_maxlength",
+                "512",
+                "--target_maxlength",
+                "16",
+                "--model_path",
+                "/raid/s3/opengptx/atlas_resources/downloads/models/atlas_nq/large",
+                "--eval_data",
+                "/raid/s3/opengptx/atlas_resources/downloads/nq_data/debug.jsonl",
+                "--load_index_path",
+                "/raid/s3/opengptx/atlas_resources/downloads/indices/atlas_nq/wiki/large",
+                "--per_gpu_batch_size",
+                "1",
+                "--n_context",
+                "40",
+                "--retriever_n_context",
+                "40",
+                "--checkpoint_dir",
+                "/raid/s3/opengptx/atlas_resources/downloads/experiments/",
+                "--load_index_path",
+                "/raid/s3/opengptx/atlas_resources/downloads/indices/atlas_nq/wiki/large",
+                "--index_mode",
+                "flat",
+                "--save_index_n_shards",
+                "4",
+                "--task",
+                "qa",
+                "--write_results"
+            ],
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "envFile": "${workspaceFolder}/.env",
+            "cwd": "${workspaceFolder}"
+        },
+    ]
+}

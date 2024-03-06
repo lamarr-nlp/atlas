@@ -231,6 +231,9 @@ class AtlasAPI(FastAPI):
     def inference_with_retrieval_api(self, queries: List[str], topk: int = 100) -> AtlasOutput:
         logger.info("Inference Request")
         predictions, retrieved_passages = inference_with_retrieval(queries=queries, model=self.model, index=self.index, opt=self.opt, topk=topk)
+        logger.info(f"Queries: {queries}")
+        logger.info(f"Generations: {predictions}")
+        logger.info(f"Passages: {retrieved_passages}")
         return AtlasOutput(generations=predictions, passages=retrieved_passages)
         
 
@@ -273,4 +276,4 @@ if __name__ == "__main__":
     # predictions = inference_with_retrieval(queries, model, index, opt)
     # logger.info(predictions)
     api = AtlasAPI(model, index, opt)
-    uvicorn.run(api, host="localhost", port=8666 + opt.local_rank)
+    uvicorn.run(api, host="localhost", port=8666)
