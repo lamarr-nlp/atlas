@@ -171,7 +171,7 @@ def evaluate(model, index, opt, data_path, step=None):
     return metrics
 
 @torch.no_grad()
-def retrieve(queries: List[str], model: Atlas, index: DistributedIndex, opt: Namespace) -> List[List[Dict[str, str]]]:
+def retrieve(queries: List[str], model: Atlas, index: DistributedIndex, opt: Namespace, topk: int) -> List[List[Dict[str, str]]]:
     model.eval()
     unwrapped_model = util.get_unwrapped_model_if_wrapped(model)
     query_enc, _, _ = unwrapped_model.tokenize(queries, [""], target_tokens=None)
@@ -179,7 +179,7 @@ def retrieve(queries: List[str], model: Atlas, index: DistributedIndex, opt: Nam
     query_mask_retriever = query_enc["attention_mask"].cuda()
     retrieved_passages, _ = unwrapped_model.retrieve(
         index,
-        opt.n_context,
+        topk,
         queries,
         query_ids_retriever,
         query_mask_retriever,
@@ -189,7 +189,7 @@ def retrieve(queries: List[str], model: Atlas, index: DistributedIndex, opt: Nam
     return retrieved_passages
 
 @torch.no_grad()
-def reader_prediction(queries: List[str], passages: List[List[Dict[str, str]]], model: Atlas):
+def reader_prediction(queries: List[str], passages: List[List[Dict[str, str]]], model: Atlas) -> List[str]:
     unwrapped_model = util.get_unwrapped_model_if_wrapped(model)
 
     reader_tokens, _ = unwrapped_model.tokenize_passages(queries, passages)
@@ -207,15 +207,17 @@ def reader_prediction(queries: List[str], passages: List[List[Dict[str, str]]], 
     return predictions
 
 @torch.no_grad()
-def inference_with_retrieval(queries, model, index, opt):
+def inference_with_retrieval(queries: List[str], model: Atlas, index: DistributedIndex, opt: Namespace, topk: int):
     model.eval()
-    retrieved_passages = retrieve(queries=queries, model=model, index=index, opt=opt)
+    retrieved_passages = retrieve(queries=queries, model=model, index=index, opt=opt, topk=topk)
     predictions = reader_prediction(queries=queries, passages=retrieved_passages, model=model)
-    return predictions
+    return predictions, retrieved_passages
 
 
-class StrList(BaseModel):
-    str_list: list[str]
+class AtlasOutput(BaseModel):
+    generations: List[str]
+    passages: List[List[Dict[str, str]]]
+
 
 class AtlasAPI(FastAPI):
     def __init__(self, model: Atlas, index: DistributedIndex, opt: Namespace, *args, **kwargs) -> None:
@@ -224,11 +226,12 @@ class AtlasAPI(FastAPI):
         self.index = index
         self.opt = opt
 
-        self.add_api_route("/inference_with_retrieval", self.inference_with_retrieval_api, methods=["POST"], response_model=StrList)
+        self.add_api_route("/inference_with_retrieval", self.inference_with_retrieval_api, methods=["POST"], response_model=AtlasOutput)
 
-    def inference_with_retrieval_api(self, queries: StrList) -> StrList:
+    def inference_with_retrieval_api(self, queries: List[str], topk: int = 100) -> AtlasOutput:
         logger.info("Inference Request")
-        return StrList(str_list=inference_with_retrieval(queries.str_list, self.model, self.index, self.opt))
+        predictions, retrieved_passages = inference_with_retrieval(queries=queries, model=self.model, index=self.index, opt=self.opt, topk=topk)
+        return AtlasOutput(generations=predictions, passages=retrieved_passages)
         
 
 if __name__ == "__main__":

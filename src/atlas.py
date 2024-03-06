@@ -14,9 +14,10 @@ from typing import List, Optional, Union
 import numpy as np
 import torch
 import torch.nn as nn
+from src.fid import FiD
 
 from src import dist_utils
-from src.retrievers import EMBEDDINGS_DIM
+from src.retrievers import EMBEDDINGS_DIM, Contriever
 
 logger = logging.getLogger(__name__)
 IGNORE_INDEX: int = -100
@@ -43,8 +44,8 @@ class Atlas(nn.Module):
     def __init__(self, opt, reader, retriever, reader_tokenizer, retriever_tokenizer):
         super(Atlas, self).__init__()
 
-        self.reader = reader
-        self.retriever = retriever
+        self.reader: FiD = reader
+        self.retriever: Contriever = retriever
         self.reader_tokenizer = reader_tokenizer
         self.retriever_tokenizer = retriever_tokenizer
         self.opt = opt
